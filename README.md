@@ -1,6 +1,6 @@
 This is an attempt at re-creating an application for managing the DigiTech RP360XP on Linux and Windows.
 
-It has been made with the help of Claude Code.
+It has been made with the help of Claude Code, it is made in python + Qt.
 
 ![RP360XP Controller window under Debian](RP360XPController.png)
 
@@ -8,7 +8,7 @@ Not fancy, but working and a little more features than Nexus :)
 
 1. This part is about the connection to the device. You have to choose the appropriate serial port (it should be detected automatically).
 
-2. This part is about system settings. Some were not exposed in the original Windows Nexus software.
+2. This part is about system settings. Some were not exposed in the original Windows Nexus software. You can export and import them.
 
 3. This is to perform full backups / restores. The program can use backups coming from Nexus. And the files created by the program can be used in Nexus too.
 
@@ -39,7 +39,7 @@ A complete command line tool exists too. You can use it to automate stuff with t
 
 What's next?
 
-I plan to polish a little the UI (for example, provide the units and proper range for the LFO speed), externalize all the strings to allow translations.
+I plan to polish a little the UI (for example, provide the units and proper range for the LFO speed), externalize all the strings to allow translations, make the import/export buttons for the presets and the system settings more distinguishable.
 
 I have to think about the connection phase too: as of today, the program reads all the user presets' names, and all the factory presets' names too. Nexus must have a hard-coded list of the factory presets, because it does not read them, speeding up the connection process.
 
