@@ -123,6 +123,12 @@ class DeviceWorker(QObject):
     def clear_stomp(self, ctrl: str):
         self._run(lambda: self._device.clear_stomp(ctrl))
 
+    # ---------------------------------------------------------- ctrl fields
+
+    @Slot(str, str, int)
+    def set_ctrl_field(self, ctrl: str, field: str, value: int):
+        self._run(lambda: self._device.set_ctrl_field(ctrl, field, value))
+
     # ---------------------------------------------------------- private
 
     def _run(self, fn):

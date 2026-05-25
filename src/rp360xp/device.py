@@ -255,6 +255,12 @@ class Device:
             }},
         )
 
+    def set_ctrl_field(self, ctrl: str, field: str, value) -> None:
+        """Set a single numeric field on a controller (MIN, MAX, SPEED, WAVEFORM)."""
+        if ctrl not in self.ALL_CONTROLS:
+            raise ValueError(f"ctrl must be one of {self.ALL_CONTROLS}, got {ctrl!r}")
+        self._protocol.send_command("sp", path=f"preset/ctrls/{ctrl}/{field}", value=value)
+
     def clear_ctrl(self, ctrl: str) -> None:
         """Remove the assignment for any controller (all seven names accepted)."""
         if ctrl not in self.ALL_CONTROLS:

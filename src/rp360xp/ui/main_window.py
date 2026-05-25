@@ -48,6 +48,7 @@ class MainWindow(QMainWindow):
     _save_requested      = Signal()
     _stomp_assign        = Signal(str, int)
     _stomp_clear         = Signal(str)
+    _ctrl_field_changed  = Signal(str, str, int)
 
     def __init__(self):
         super().__init__()
@@ -77,6 +78,7 @@ class MainWindow(QMainWindow):
         self._preset_panel.save_clicked.connect(self._save_requested)
         self._preset_panel.refresh_clicked.connect(self._refresh_requested)
         self._preset_panel.stomp_changed.connect(self._on_stomp_changed)
+        self._preset_panel.ctrl_field_changed.connect(self._ctrl_field_changed)
         self._preset_panel.setEnabled(False)
         root.addWidget(self._preset_panel, 1)
 
@@ -134,6 +136,7 @@ class MainWindow(QMainWindow):
         self._save_requested.connect(self._worker.save_preset)
         self._stomp_assign.connect(self._worker.assign_stomp)
         self._stomp_clear.connect(self._worker.clear_stomp)
+        self._ctrl_field_changed.connect(self._worker.set_ctrl_field)
 
         # worker → UI
         self._worker.connection_changed.connect(self._on_connection_changed)
