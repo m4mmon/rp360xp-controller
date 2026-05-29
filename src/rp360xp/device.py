@@ -42,6 +42,8 @@ class Device:
         self._protocol = Protocol(self._transport)
         self._protocol.on_notification(self._on_notification)
         self._notification_handlers: list = []
+        self._disconnect_handlers: list = []
+        self._transport.on_error(self._on_transport_error)
 
     # ----------------------------------------------------------------- context
 
@@ -90,11 +92,8 @@ class Device:
     def _preset_names(self, bank: str, progress=None) -> list[Optional[str]]:
         names = []
         for i in range(NUM_PRESETS):
-            try:
-                name = self._protocol.send_command("rp", path=f"banks/{bank}/{i}/name")
-                names.append(name)
-            except Exception:
-                names.append(None)
+            name = self._protocol.send_command("rp", path=f"banks/{bank}/{i}/name")
+            names.append(name)
             if progress:
                 progress(i + 1, NUM_PRESETS)
         return names
@@ -453,6 +452,17 @@ class Device:
         'cm' messages (footswitch presses, expression pedal, preset changes).
         """
         self._notification_handlers.append(handler)
+
+    def on_disconnect(self, handler) -> None:
+        """Register a callback invoked when the serial connection is lost unexpectedly."""
+        self._disconnect_handlers.append(handler)
+
+    def _on_transport_error(self, exc: Exception) -> None:
+        for h in self._disconnect_handlers:
+            try:
+                h(exc)
+            except Exception:
+                log.exception("Disconnect handler raised")
 
     def _on_notification(self, msg: list) -> None:
         for h in self._notification_handlers:

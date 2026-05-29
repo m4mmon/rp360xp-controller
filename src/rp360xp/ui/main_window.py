@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 import sys
+
+log = logging.getLogger(__name__)
 
 from PySide6.QtCore import Qt, QThread, Signal, Slot
 from PySide6.QtWidgets import (
@@ -101,6 +104,7 @@ class MainWindow(QMainWindow):
         self._current_slot_0 = 0
         self._current_preset_name = ""
         self._suppress_next_preset_change = False
+        self._user_disconnecting = False
         self._build_ui()
         self._build_worker()
 
@@ -139,25 +143,28 @@ class MainWindow(QMainWindow):
         self._preset_panel = PresetPanel()
         self._preset_panel.enable_toggled.connect(self._enable_changed)
         self._preset_panel.enable_toggled.connect(self._preset_panel.update_enable)
-        self._preset_panel.enable_toggled.connect(lambda *_: self._preset_panel.mark_dirty())
+        self._preset_panel.enable_toggled.connect(lambda *_: self._mark_dirty())
         self._preset_panel.param_changed.connect(self._param_changed)
-        self._preset_panel.param_changed.connect(lambda *_: self._preset_panel.mark_dirty())
+        self._preset_panel.param_changed.connect(lambda *_: self._mark_dirty())
         self._preset_panel.level_changed.connect(self._level_changed)
-        self._preset_panel.level_changed.connect(lambda *_: self._preset_panel.mark_dirty())
+        self._preset_panel.level_changed.connect(lambda *_: self._mark_dirty())
         self._preset_panel.save_clicked.connect(self._save_requested)
         self._preset_panel.refresh_clicked.connect(self._refresh_requested)
         self._preset_panel.stomp_changed.connect(self._on_stomp_changed)
+        self._preset_panel.stomp_changed.connect(lambda *_: self._mark_dirty())
         self._preset_panel.ctrl_field_changed.connect(self._ctrl_field_changed)
+        self._preset_panel.ctrl_field_changed.connect(lambda *_: self._mark_dirty())
         self._preset_panel.expression_assign.connect(self._expression_assign)
-        self._preset_panel.expression_assign.connect(lambda *_: self._preset_panel.mark_dirty())
+        self._preset_panel.expression_assign.connect(lambda *_: self._mark_dirty())
         self._preset_panel.lfo_assign.connect(self._lfo_assign)
-        self._preset_panel.lfo_assign.connect(lambda *_: self._preset_panel.mark_dirty())
+        self._preset_panel.lfo_assign.connect(lambda *_: self._mark_dirty())
         self._preset_panel.model_changed.connect(self._model_changed)
-        self._preset_panel.model_changed.connect(lambda *_: self._preset_panel.mark_dirty())
+        self._preset_panel.model_changed.connect(lambda *_: self._mark_dirty())
         self._preset_panel.delete_requested.connect(self._delete_requested)
         self._preset_panel.slot_add_requested.connect(self._slot_add_requested)
         self._preset_panel.slot_replace_requested.connect(self._slot_replace_requested)
         self._preset_panel.reorder_requested.connect(self._reorder_requested)
+        self._preset_panel.reorder_requested.connect(lambda *_: self._mark_dirty())
         self._preset_panel.import_requested.connect(self._import_requested)
         self._preset_panel.export_requested.connect(self._export_requested)
         self._preset_panel.store_new_clicked.connect(self._on_store_new_clicked)
@@ -264,6 +271,7 @@ class MainWindow(QMainWindow):
             port = self._port_combo.currentText().strip()
             self._connect_requested.emit(port)
         else:
+            self._user_disconnecting = True
             self._disconnect_requested.emit()
 
     def _populate_ports(self):
@@ -294,12 +302,21 @@ class MainWindow(QMainWindow):
             self._conn_lbl.setText(f"Connected · {port}")
             self._conn_lbl.setStyleSheet("color: #7fc97f;")
         else:
+            unexpected = not self._user_disconnecting
+            self._user_disconnecting = False
             self._preset_panel.clear()
             self._preset_list.clear()
             self._current_dirty = False
             self._current_preset_name = ""
             self._conn_lbl.setText("Disconnected")
             self._conn_lbl.setStyleSheet("color: #aaa;")
+            if unexpected:
+                QMessageBox.warning(
+                    self,
+                    "Connection lost",
+                    "The connection to the RP360XP was lost.\n"
+                    "Check the USB cable and reconnect.",
+                )
 
     @Slot(object, bool, str, int)
     def _on_preset_changed(self, preset, dirty: bool, bank: str, slot_1: int):
@@ -523,6 +540,10 @@ class MainWindow(QMainWindow):
             return "no"
         return "cancel"
 
+    def _mark_dirty(self):
+        self._current_dirty = True
+        self._preset_panel.mark_dirty()
+
     @Slot(str)
     def _on_error(self, msg: str):
         self.statusBar().showMessage(f"Error: {msg}", 8000)
@@ -535,45 +556,52 @@ class MainWindow(QMainWindow):
 
         if cmd == "np" and len(msg) >= 4:
             path, value = str(msg[2]), msg[3]
-
-            # preset/fxc/N/fx/PARAM
-            m = re.search(r'fxc/(\d+)/fx/([^/]+)$', path)
-            if m:
-                self._preset_panel.update_param(int(m.group(1)), m.group(2), int(value))
-                return
-
-            # preset/fxc/N/ENABLE or preset/fxc/N/FLATPARAM
-            m = re.search(r'fxc/(\d+)/([^/]+)$', path)
-            if m:
-                slot, param = int(m.group(1)), m.group(2)
-                if param == "ENABLE":
-                    self._preset_panel.update_enable(slot, bool(value))
-                else:
-                    self._preset_panel.update_param(slot, param, int(value))
-                return
-
-            # preset level
-            if path in ("preset/PRS LEVL", "PRS LEVL"):
-                self._preset_panel.update_level(int(value))
-                return
-
-            # preset name or ctrls assignment — require full model refresh
-            if path in ("preset/name", "name") or path.startswith("ctrls/"):
-                self._refresh_requested.emit()
-                return
-
-            # system settings
-            if path.startswith("system/"):
-                param = path[len("system/"):]
-                if param in ("FSWMODE", "EXTFSWMODE", "LOOPERPOS",
-                             "STEREO", "OUTPUTSW", "USB REC", "USB PBKQ"):
-                    self._system_bar.update_param(param, int(value))
-                    return
-                if param == "MASTERVOL":
-                    self.statusBar().showMessage(f"Master vol → {value}", 3000)
+            try:
+                # preset/fxc/N/fx/PARAM
+                m = re.search(r'fxc/(\d+)/fx/([^/]+)$', path)
+                if m:
+                    self._preset_panel.update_param(int(m.group(1)), m.group(2), int(value))
+                    self._mark_dirty()
                     return
 
-            self.statusBar().showMessage(f"np  {path} = {value}", 3000)
+                # preset/fxc/N/ENABLE or preset/fxc/N/FLATPARAM
+                m = re.search(r'fxc/(\d+)/([^/]+)$', path)
+                if m:
+                    slot, param = int(m.group(1)), m.group(2)
+                    if param == "ENABLE":
+                        self._preset_panel.update_enable(slot, bool(value))
+                    else:
+                        self._preset_panel.update_param(slot, param, int(value))
+                    return
+
+                # preset level
+                if path in ("preset/PRS LEVL", "PRS LEVL"):
+                    self._preset_panel.update_level(int(value))
+                    self._mark_dirty()
+                    return
+
+                # preset name or ctrls assignment — require full model refresh
+                if path in ("preset/name", "name") or path.startswith("ctrls/"):
+                    self._refresh_requested.emit()
+                    return
+
+                # system settings
+                if path.startswith("system/"):
+                    param = path[len("system/"):]
+                    if param in ("FSWMODE", "EXTFSWMODE", "LOOPERPOS",
+                                 "STEREO", "OUTPUTSW", "USB REC", "USB PBKQ"):
+                        self._system_bar.update_param(param, int(value))
+                        return
+                    if param == "MASTERVOL":
+                        self.statusBar().showMessage(f"Master vol → {value}", 3000)
+                        return
+
+                self.statusBar().showMessage(f"np  {path} = {value}", 3000)
+            except (TypeError, ValueError):
+                log.warning(
+                    "np notification ignored — unexpected value type: path=%r value=%r",
+                    path, value
+                )
 
         elif cmd == "cm":
             # Save confirmation: cm path='preset' value='banks/user/N'
@@ -587,6 +615,7 @@ class MainWindow(QMainWindow):
     # ---------------------------------------------------------- cleanup
 
     def closeEvent(self, event):
+        self._user_disconnecting = True
         self._disconnect_requested.emit()
         self._thread.quit()
         self._thread.wait(2000)

@@ -29,10 +29,11 @@ Packet formats (spec §2):
 from __future__ import annotations
 
 import logging
+import math
 import queue
 import threading
 from dataclasses import dataclass
-from typing import Optional
+from typing import Callable, Optional
 
 import serial
 import serial.tools.list_ports
@@ -73,9 +74,14 @@ class Transport:
         self._write_lock = threading.Lock()
         self._host_seq = 0
         self._dack_pending: dict[int, threading.Event] = {}
+        self._error_handler: Optional[Callable] = None
         self._dack_lock = threading.Lock()
 
     # ------------------------------------------------------------------ public
+
+    def on_error(self, handler: Callable[[Exception], None]) -> None:
+        """Register a callback invoked when the read thread dies (serial error)."""
+        self._error_handler = handler
 
     @staticmethod
     def find_port() -> Optional[str]:
@@ -119,15 +125,14 @@ class Transport:
         on_progress(done, total) is called after each fragment is acknowledged,
         where done and total are fragment counts.
         """
-        import math
         total = math.ceil(len(payload) / SEND_CHUNK) if payload else 1
         done = 0
         for chunk in _split(payload, SEND_CHUNK):
-            seq = self._next_seq()
-            pkt = self._build_small(CHAN_CMD, seq, chunk)
             event = threading.Event()
             with self._dack_lock:
+                seq = self._next_seq()
                 self._dack_pending[seq] = event
+            pkt = self._build_small(CHAN_CMD, seq, chunk)
             self._write(pkt)
             if not event.wait(timeout=5.0):
                 with self._dack_lock:
@@ -165,6 +170,8 @@ class Transport:
                     self._parse_buffer()
             except serial.SerialException as exc:
                 log.error("Serial read error: %s", exc)
+                if self._error_handler:
+                    self._error_handler(exc)
                 break
 
     def _parse_buffer(self) -> None:

@@ -26,9 +26,10 @@ class DeviceWorker(QObject):
     operation_progress    = Signal(int, int, str)      # done, total, label
     operation_done        = Signal(str)                # status message
 
-    # Internal: queued trigger so _emit_preset() runs on the worker thread,
-    # not on the transport reader thread where notifications arrive.
-    _refresh_needed = Signal()
+    # Internal queued signals — fired from the transport reader thread,
+    # consumed on the worker thread.
+    _refresh_needed  = Signal()
+    _device_lost     = Signal(str)   # error message
 
     def __init__(self):
         super().__init__()
@@ -36,6 +37,7 @@ class DeviceWorker(QObject):
         self._db = EffectsDB()
         self._user_preset_names: list = []
         self._refresh_needed.connect(self.refresh_preset)
+        self._device_lost.connect(self._on_device_lost)
 
     # ---------------------------------------------------------- connection
 
@@ -45,6 +47,7 @@ class DeviceWorker(QObject):
         try:
             dev = Device(port=port or None)
             dev.on_notification(self._on_notification)
+            dev.on_disconnect(lambda exc: self._device_lost.emit(str(exc)))
             dev.connect()
             self._device = dev
             self.connection_changed.emit(True, port or "auto")
@@ -58,9 +61,11 @@ class DeviceWorker(QObject):
 
     @Slot()
     def disconnect_device(self):
+        was_connected = self._device is not None
         self._safe_disconnect()
         self._user_preset_names = []
-        self.connection_changed.emit(False, "")
+        if was_connected:
+            self.connection_changed.emit(False, "")
 
     # ---------------------------------------------------------- preset
 
@@ -352,24 +357,25 @@ class DeviceWorker(QObject):
     def _fetch_factory_names(self):
         if not self._device:
             return
+        _TOTAL = 198
+        _LABEL = "Loading factory preset list…"
         try:
-            _TOTAL = 198
-            _LABEL = "Loading factory preset list…"
             self.preset_name_progress.emit(99, _TOTAL, _LABEL)
             names = self._device.factory_preset_names(
                 progress=lambda done, total: self.preset_name_progress.emit(
                     done + 99, _TOTAL, _LABEL)
             )
             self.factory_names_changed.emit(names)
-        except Exception:
-            pass
+        except Exception as exc:
+            self.preset_name_progress.emit(_TOTAL, _TOTAL, _LABEL)
+            self.error_occurred.emit(str(exc))
 
     def _fetch_preset_names(self):
         if not self._device:
             return
+        _TOTAL = 198
+        _LABEL = "Loading user preset list…"
         try:
-            _TOTAL = 198
-            _LABEL = "Loading user preset list…"
             self.preset_name_progress.emit(0, _TOTAL, _LABEL)
             names = self._device.user_preset_names(
                 progress=lambda done, total: self.preset_name_progress.emit(
@@ -377,8 +383,16 @@ class DeviceWorker(QObject):
             )
             self._user_preset_names = names
             self.preset_names_changed.emit(names)
-        except Exception:
-            pass
+        except Exception as exc:
+            self.preset_name_progress.emit(_TOTAL, _TOTAL, _LABEL)
+            self.error_occurred.emit(str(exc))
+
+    @Slot(str)
+    def _on_device_lost(self, msg: str):
+        self._device = None
+        self._user_preset_names = []
+        self.error_occurred.emit(msg)
+        self.connection_changed.emit(False, "")
 
     def _safe_disconnect(self):
         if self._device:

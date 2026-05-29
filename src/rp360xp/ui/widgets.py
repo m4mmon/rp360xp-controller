@@ -596,9 +596,6 @@ class SystemBar(QFrame):
             self._spins[name].setValue(raw - offset)
         self._suppress = False
 
-
-# ---------------------------------------------------------------- AmpPanel
-
 # ---------------------------------------------------------------- SlotCard
 
 class SlotCard(QFrame):
@@ -1244,11 +1241,14 @@ class ExprCtrlSection(QFrame):
 
         self._rebuild_param_combo(current_slot, current_param)
 
-        if ctrl:
+        if current_slot >= 0 and ctrl:
             if ctrl.min is not None:
                 self._row_min.set_value(ctrl.min)
             if ctrl.max is not None:
                 self._row_max.set_value(ctrl.max)
+        else:
+            self._row_min.set_value(0)
+            self._row_max.set_value(0)
 
         self._update_controls_enabled(current_slot >= 0)
         self._suppress = False
@@ -1257,6 +1257,9 @@ class ExprCtrlSection(QFrame):
         slot_idx = self._slot_combo.currentData()
         self._rebuild_param_combo(slot_idx if slot_idx is not None else -1, None)
         self._update_controls_enabled(slot_idx is not None and slot_idx >= 0)
+        if not (slot_idx is not None and slot_idx >= 0):
+            self._row_min.set_value(0)
+            self._row_max.set_value(0)
         self._on_any_change()
 
     def _rebuild_param_combo(self, slot_idx: int, current_param: str | None):
@@ -1380,7 +1383,7 @@ class LfoSection(QFrame):
 
         self._rebuild_param_combo(current_slot, current_param)
 
-        if ctrl:
+        if current_slot >= 0 and ctrl:
             if ctrl.min is not None:
                 self._row_min.set_value(ctrl.min)
             if ctrl.max is not None:
@@ -1394,14 +1397,27 @@ class LfoSection(QFrame):
                 if wi >= 0:
                     self._wave_combo.setCurrentIndex(wi)
                 self._wave_combo.blockSignals(False)
+        else:
+            self._reset_values()
 
         self._update_controls_enabled(current_slot >= 0)
         self._suppress = False
+
+    def _reset_values(self):
+        self._row_min.set_value(0)
+        self._row_max.set_value(0)
+        self._row_speed.set_value(0)
+        self._wave_val = 0
+        self._wave_combo.blockSignals(True)
+        self._wave_combo.setCurrentIndex(0)
+        self._wave_combo.blockSignals(False)
 
     def _on_slot_changed(self):
         slot_idx = self._slot_combo.currentData()
         self._rebuild_param_combo(slot_idx if slot_idx is not None else -1, None)
         self._update_controls_enabled(slot_idx is not None and slot_idx >= 0)
+        if not (slot_idx is not None and slot_idx >= 0):
+            self._reset_values()
         self._on_any_change()
 
     def _rebuild_param_combo(self, slot_idx: int, current_param: str | None):
@@ -1486,11 +1502,14 @@ class WahSection(QFrame):
         self._lnk_lbl.setText(_lnk_label(ctrl.lnk if ctrl else "", preset))
         for row in self._rows.values():
             row.setEnabled(assigned)
-        if ctrl:
+        if assigned and ctrl:
             if ctrl.min is not None:
                 self._rows["MIN"].set_value(ctrl.min)
             if ctrl.max is not None:
                 self._rows["MAX"].set_value(ctrl.max)
+        else:
+            self._rows["MIN"].set_value(0)
+            self._rows["MAX"].set_value(0)
 
 
 # ---------------------------------------------------------------- BottomPanel
